@@ -43,7 +43,7 @@
     <Compile Include="RandomVariables.fs" />
   </ItemGroup>
   <ItemGroup>
-    <ProjectReference Include="..\RandomTools\RandomTools.csproj">
+    <ProjectReference Include="..\tools\RandomTools.net\RandomTools.csproj">
       <Name>RandomTools</Name>
       <Project>{84663456-5d7c-47a5-922f-e93b870e88de}</Project>
       <Private>True</Private>
