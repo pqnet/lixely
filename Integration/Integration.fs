@@ -1,5 +1,6 @@
 ﻿module Integration
 
+
 type D<'T> =
     | Integrator of (('T -> obj) -> (float->obj->obj) -> (obj -> obj -> obj) -> obj)
     //                function           scaling            aggregation        result
@@ -9,9 +10,9 @@ type D<'T> =
         let osum = fun a-> unbox >> (unbox a |> ssum) >> box
         f (smap>>box) omul osum |> unbox<'U>
         
-let dni (x:'T) = Integrator <| fun f s a -> s 1.0 (f x)
+let inline dni (x:'T) = Integrator <| fun f s a -> s 1.0 (f x)
 
-let D (x: 'T ->'U) (d:D<'T>) =
+let inline D (x: 'T ->'U) (d:D<'T>) =
     let if1 f s a = d.intfun (x>>f) s a
     Integrator if1
 
@@ -34,7 +35,7 @@ let dmi2 (Integrator(if1):D<D<'T>>): D<'T> =
     fun f s a -> if1 (fun (Integrator(g)) -> g f s a ) (scaleB) (sumB)
     |> Integrator
 
-let dmi (d:D<D<'T>>): D<'T> =
+let inline dmi (d:D<D<'T>>): D<'T> =
     fun f s a ->
         d.intfun (fun d -> d.intfun f s a) s a
     |> Integrator
@@ -49,12 +50,26 @@ let inline dehlay (Integrator(f): D< ^T > ) () =
 
 type IntegratorBuilder =
     | IntegratorBuilder
-    member x.Return(v:'T) = dni v
-    member x.Bind(v:D<'T>,c:'T -> D<'U>) =
+    member inline x.Return(v:'T) = dni v
+    member inline x.Bind(v:D<'T>,c:'T -> D<'U>) =
         let a = D c v 
         dmi a
-        
-    //member inline x.Delay(i) = dehlay i
-        
+    member inline x.Bind(v:bool,c:unit->D<'T>) =
+        let cg = if v then x.Bind(c (),fun v -> x.Return(Some v)) else x.Return None
+        Integrator <| fun f s a ->
+            let ff = Option.map (fun x -> 1.0,f x)
+            let ss (scale:float) :(float*obj) option -> _ = Option.map <| fun (p,v) -> p * scale,s scale v
+            let aa p1 p2 =
+                match p1,p2 with
+                | None,x -> x
+                | Some x,None -> Some x
+                | Some (p1:float,v1), Some (p2,v2) -> Some (p1+p2,a v1 v2)
+            match cg.intfun ff ss aa with
+            | Some (p,v) -> s (1.0/p) v
+            | None -> failwith "the condition imposed is almost never satisfied for the given priors"
+//            let cont = x.Bind(v,fun guard -> if guard then x.Bind(c(),Some()) else None)
+//            let support = ( v.intfun (fun b -> if b then 1.0 else 0.0) (*) (+))
+//            v.intfun (fun b -> cont.intfun (fun x -> s (if b then 1.0 else 0.0) <| f x) s a) 
+   
 let dist = IntegratorBuilder
 let bernoulli x = Integrator <| fun f s a -> a (s x (f true)) (s (1.0-x) (f false))
