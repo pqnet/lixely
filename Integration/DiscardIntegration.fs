@@ -57,12 +57,11 @@ type IntegratorBuilder =
 let dist = IntegratorBuilder
 let bernoulli x = Integrator <| fun f s a z -> a (s x (f true)) (s (1.0-x) (f false)) |> Some
 
-let b = true || false
 let d = 
     dist {
         let! a = bernoulli 0.5
         let! b = bernoulli 0.5
-        coerce (a)
+        coerce (a || b)
         return a
     }
 
