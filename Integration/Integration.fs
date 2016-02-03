@@ -45,7 +45,7 @@ let inline dmi (d:D<D<'T>>): D<'T> =
 let inline dehlay (Integrator(f): D< ^T > ) () =
     let boxsum (a:obj) (b:obj) = (unbox a: ^T) + (unbox b : ^T) |> box
     let boxmult (a:float) (b:obj) = (a:float) * (unbox b : ^T) |> box
-    f box boxmult boxsum |> unbox< ^T >
+    f box boxmult boxsum |> unbox< ^T > 
 *)
 
 type IntegratorBuilder =

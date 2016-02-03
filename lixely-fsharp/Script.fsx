@@ -1,7 +1,7 @@
 ﻿// This file is a script that can be executed with the F# Interactive.  
 // It can be used to explore and test the library project.
 // Note that script files will not be part of the project build.
-
+(*
 
 
 
@@ -410,3 +410,69 @@ let maryGetsWet = random {
     let! umbrella = maryBringsUmbrella
     return rain && (not umbrella)
     }
+
+
+
+*)
+
+open Microsoft.FSharp.Quotations
+open Microsoft.FSharp.Quotations.Patterns
+open Microsoft.FSharp.Quotations.DerivedPatterns
+
+let myid = "unidform"
+let uniform =  Expr.Cast<double> (Expr.Var (Var(myid,typeof<double>,false)))
+
+let myvar =  Expr.Cast<double> (Expr.Var (Var("unidform",typeof<double>,false)))
+
+let bernoulliquote p =
+    <@
+        %uniform < p
+    @>
+
+let rec binomial p n =
+    if n > 0 then
+        <@
+            (
+            if %(bernoulliquote p) then
+                1
+            else
+                0
+            ) + (%binomial p (n-1) )
+        @>
+    else
+        <@ 0 @>
+
+let binomial2 p n =
+    <@
+        let rec binomial (m:int) =
+            if n = 0 then
+                0
+            else
+                (binomial m-1) +
+                    if %(bernoulliquote p) then
+                        1
+                    else
+                        0
+        binomial n
+     @>
+
+let binomial3 p n =
+    <@
+        let mutable sum = 0
+        for i in 1..n do
+            if %(bernoulliquote p) then sum <- sum + 1
+        sum
+     @>
+
+let geom p =
+    <@
+        Seq.initInfinite (fun _ -> %bernoulliquote p)
+        |> Seq.findIndex id
+     @>
+
+let geom2 p =
+    <@
+        let mutable count = 0
+        while %bernoulliquote p do count <- count + 1
+        count
+     @>
