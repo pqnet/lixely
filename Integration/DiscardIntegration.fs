@@ -13,7 +13,7 @@ type D<'T> =
         let osum = fun a-> unbox >> (unbox a |> ssum) >> box
         let ozero = box zero
         f omap omul osum ozero |> Option.map unbox<'U>
-    static member Naught = Integrator (fun f m a z -> None)
+    static member Naught = Integrator (fun f m a z -> None) : D<'T>
         
 let inline private ret (x:'T) =
     let q f m a z =
@@ -45,18 +45,17 @@ let inline private join (d:D<D<'T>>)(*: D<'T> *)=
 
 type IntegratorBuilder =
     | IntegratorBuilder
-    //member inline x.Zero = D.Naught
+    member inline x.Zero<'T> () = D.Naught :D<'T>
     member inline x.Return(v:'T) = ret v
     member inline x.Bind(v:D<'T>,c:'T -> D<'U>) =
         fmap c v |> join
 
     [<CustomOperation("coerce",MaintainsVariableSpaceUsingBind=true)>]
     member inline x.Coerce(p1:D<'T>,[<ProjectionParameter>] p2:'T->bool):D<'T> =
-        x.Bind (p1,fun e -> if p2 e then x.Return e else D.Naught)
-
+        x.Bind (p1,fun e -> if p2 e then x.Return e else x.Zero ())
 
 let dist = IntegratorBuilder
-let bernoulli x = Integrator <| fun f s a z -> a (s x (f true)) (s (1.0-x) (f false)),1.0
+let bernoulli x = Integrator <| fun f s a z -> a (s x (f true)) (s (1.0-x) (f false)) |> Some
 
 let b = true || false
 let d = 
