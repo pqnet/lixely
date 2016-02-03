@@ -1,86 +1,62 @@
 ﻿module Integration
 
+let private pairwise (f1,f2) (a1:'T,a2:'U) :'V*'W= (f1 a1,f2 a2)
+
 type D<'T> =
-    | Naught
-    | Integrator of (('T -> obj) -> (float->obj->obj) -> (obj -> obj -> obj) -> obj -> obj)
+    //this is private
+    | Integrator of (('T -> obj) -> (float->obj->obj) -> (obj -> obj -> obj) -> obj -> obj option)
     //              function           scaling            aggregation          zero   result
     member x.intfun<'U> (smap:'T->'U) (smul:float->'U->'U) (ssum:'U->'U->'U) (zero:'U) =
-        match x with
-        | Integrator f ->
-            let omul = fun s -> unbox >> (smul s) >> box
-            let osum = fun a-> unbox >> (unbox a |> ssum) >> box
-            f (smap>>box) omul osum zero |> unbox<'U>
-        | Naught -> zero
+        let (Integrator(f)) = x
+        let omap = smap >> box
+        let omul = fun s -> unbox >> (smul s) >> box
+        let osum = fun a-> unbox >> (unbox a |> ssum) >> box
+        let ozero = box zero
+        f omap omul osum ozero |> Option.map unbox<'U>
+    static member Naught = Integrator (fun f m a z -> None)
         
-let inline dni (x:'T) = Integrator <| fun f m a z -> m 1.0 (f x)
+let inline private ret (x:'T) =
+    let q f m a z =
+        f x |> Some
+    q |> Integrator
 
-let inline D (x: 'T ->'U) (d:D<'T>) =
+let inline private fmap (x: 'T ->'U) (d:D<'T>) =
     let if1 f (*s a z*) = d.intfun (x>>f) (* s a z*)
     Integrator if1
 
-//troiaio. Ma che stavo facendo?
-//let dmi2 (Integrator(if1):D<D<'T>>): D<'T> =
-//    let sumD (Integrator(if1):D<'T>) (Integrator(if2):D<'T>) : D<'T> =
-//        fun f s a ->
-//            let v1 = if1 f s a
-//            let v2 = if2 f s a
-//            a v1 v2
-//        |> Integrator
-//    let scaleD (x:float) (Integrator(if1):D<'T>) : D<'T> =
-//        fun f s a ->
-//            s x <| if1 f s a
-//        |> Integrator
-//    let sumB (o1) (o2) =
-//        sumD (unbox o1:D<'T>) (unbox(o2)) |> box
-//    let scaleB (sv) (o) =
-//        scaleD sv (unbox(o):D<'T>) |> box
-//    fun f s a -> if1 (fun (Integrator(g)) -> g f s a ) (scaleB) (sumB)
-//    |> Integrator
-
-let inline dmi (d:D<D<'T>>): D<'T> =
-    fun f s a z ->
-        d.intfun (fun d -> d.intfun f s a z) s a z
-    |> Integrator
-
-//non esiste la possibilita' che qualcosa sia moltiplicabile per scalare. Ma questo non rompe le unita' di misura?
-(*
-let inline dehlay (Integrator(f): D< ^T > ) () =
-    let boxsum (a:obj) (b:obj) = (unbox a: ^T) + (unbox b : ^T) |> box
-    let boxmult (a:float) (b:obj) = (a:float) * (unbox b : ^T) |> box
-    f box boxmult boxsum |> unbox< ^T > 
-*)
+let inline private join (d:D<D<'T>>)(*: D<'T> *)=
+    let q f m a z =
+        //outf :: D<'T> -> 'T integrando f
+        let outf (d:D<'T>)  = d.intfun f m a z |> Option.map (fun x -> x,1.0)
+        let outm s = Option.map (fun (x,wx) -> m s x,wx * s)
+        let outa x y =
+            match (x,y) with
+            | (Some (x,wx), Some (y,wy)) -> Some (a x y,(wx+wy))
+            | (None,None) -> None
+            | (Some _, None) -> x 
+            | (None,Some _) -> y
+        let outz = None
+        let v = d.intfun outf outm outa outz
+        match v with
+        | None -> None
+        | Some None -> None
+        | Some (Some (x,w)) -> m (1.0/w) x |> Some
+    q |> Integrator
 
 type IntegratorBuilder =
     | IntegratorBuilder
-    member inline x.Zero = Naught
-    member inline x.Return(v:'T) = dni v
+    //member inline x.Zero = D.Naught
+    member inline x.Return(v:'T) = ret v
     member inline x.Bind(v:D<'T>,c:'T -> D<'U>) =
-        let a = D c v 
-        dmi a
-//    member inline x.Bind(v:bool,c:unit->D<'T>) =
-//        let cg = if v then x.Bind(c (),fun v -> x.Return(Some v)) else x.Return None
-//        Integrator <| fun f s a ->
-//            let ff = Option.map (fun x -> 1.0,f x)
-//            let ss (scale:float) :(float*obj) option -> _ = Option.map <| fun (p,v) -> p * scale,s scale v
-//            let aa p1 p2 =
-//                match p1,p2 with
-//                | None,x -> x
-//                | Some x,None -> Some x
-//                | Some (p1:float,v1), Some (p2,v2) -> Some (p1+p2,a v1 v2)
-//            match cg.intfun ff ss aa with
-//            | Some (p,v) -> s (1.0/p) v
-//            | None -> failwith "the condition imposed is almost never satisfied for the given priors"
+        fmap c v |> join
 
-//            let cont = x.Bind(v,fun guard -> if guard then x.Bind(c(),Some()) else None)
-//            let support = ( v.intfun (fun b -> if b then 1.0 else 0.0) (*) (+))
-//            v.intfun (fun b -> cont.intfun (fun x -> s (if b then 1.0 else 0.0) <| f x) s a) 
     [<CustomOperation("coerce",MaintainsVariableSpaceUsingBind=true)>]
     member inline x.Coerce(p1:D<'T>,[<ProjectionParameter>] p2:'T->bool):D<'T> =
-        x.Bind (p1,fun e -> if p2 e then x.Return e else Naught)
+        x.Bind (p1,fun e -> if p2 e then x.Return e else D.Naught)
 
 
 let dist = IntegratorBuilder
-let bernoulli x = Integrator <| fun f s a z -> a (s x (f true)) (s (1.0-x) (f false))
+let bernoulli x = Integrator <| fun f s a z -> a (s x (f true)) (s (1.0-x) (f false)),1.0
 
 let b = true || false
 let d = 
