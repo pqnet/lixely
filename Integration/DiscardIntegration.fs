@@ -70,14 +70,14 @@ type D<'T,'U  when ^U : (       member  Scale : float -> unit)
 
 
 let inline bool2float b =
-    let mutable r = FloatVector()
+    let mutable r = make<FloatVector>()
     r.v <- if b then 1.0 else 0.0
     r
 
 let inline zero () = origin ()
 
 let inline result v =
-    let mutable r = DistResult<_>()
+    let mutable r = make<DistResult<_>>()
     r.v <- v
     r.w <- 1.0
     r
@@ -89,22 +89,22 @@ let inline makeMap v =
 
 type IntegratorBuilder =
     | IntegratorBuilder
-    (*
-    member inline dist.Spiattella(x:D<'T,MapVector<_>>):D<'T,_> =
+    
+    member inline dist.Spiattella(x:D<'T,MapVector<_>>) : D<'T,_> =
         let r = x makeMap
-        match r.snd.v with
-        | 0.0 -> fun _ -> DistResult<_> ()
+        match r.w with
+        | 0.0 -> fun f -> zero ()
         | w ->
-            // TODO
-            let a = Map.toArray r.fst.map
+            let a = Map.toArray r.v.map
             fun f ->
-                let r = zero ()
-                reset r.fst
-                r.snd.Set(w)
+                let mutable r : DistResult<_> = zero ()
+                r.w <- w
                 for (v,s) in a do
-                    r.fst +=| (f v *= s)
+                    let mutable tmp = f v
+                    &tmp *=| s
+                    &r.v +=| tmp
                 r
-*)
+
     member inline dist.Run x = x // dist.Spiattella x
     member inline dist.Zero() : D<_,_> = fun f -> zero ()
     member inline dist.Return(x) : D<_,_>  = fun f -> result (f x)
