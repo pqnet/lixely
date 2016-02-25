@@ -105,94 +105,6 @@ struct Dist {
 	}
 };
 
-template<class T,class E>
-struct Normalized: Dist<T,Normalized<T,E>> {
-	const Dist<T,E>& unnorm;
-	
-	Normalized(Dist<T,E> const &v): unnorm(v){}
-
-	template<typename F>
-	auto integrate(F&& fun) const {
-		auto v = unnorm.integrate(fun);
-		return std::move(tmath::tdiv(v,unnorm.norm()));
-	}
-
-	tprob norm() const { return 1.0; }
-};
-
-template<class T,class E>
-auto operator ~(Dist<T,E> const&v) { return Normalized<T,E>(v); }
-
-template<class T,class E1,class E2>
-struct Sum: Dist<T,Sum<T,E1,E2>> {
-	Dist<T,E1> const &lhs;
-	Dist<T,E2> const &rhs;
-	Sum(Dist<T,E1> tb, Dist<T,E2> fb):lhs(tb),rhs(fb) {} 
-
-	template<class F>
-	auto integrate(F&& fun) const {
-
-		auto v = lhs.integrate(fun);
-		return std::move(tmath::tadd(v,rhs.integrate(fun)));
-	}
-
-	tprob norm() const { return lhs.norm() + rhs.norm(); }
-};
-
-template<class T,class E1,class E2>
-auto operator +(Dist<T,E1> lhs,Dist<T,E2> rhs) { return Sum<T,E1,E2>(lhs,rhs); }
-
-template<class T,class E>
-struct Mul: Dist<T,Mul<T,E>> {
-	Dist<T,E> const &lhs;
-	tprob scale;
-	Mul(Dist<T,E> tb, tprob fb):lhs(tb),scale(fb) {} 
-
-	template<class F>
-	auto integrate(F&& fun) const {
-		auto v = lhs.integrate(fun);
-		return std::move(tmath::tmul(v,scale));
-	}
-	tprob norm() const { return lhs.norm() * scale; }
-
-};
-template<class T,class E>
-auto operator *(Dist<T,E> lhs,tprob scale) { return Mul<T,E>(lhs,scale); }
-
-template<class T,class E>
-auto operator *(tprob scale,Dist<T,E> lhs) { return Mul<T,E>(lhs,scale); }
-
-template<class T,class E1,class E2>
-auto mix(tprob v, Dist<T,E1> lhs,Dist<T,E2> rhs) {
-       	return ~((lhs * v) + (rhs * (tprob(1.0) - v)));
-}
-
-template<class T,class E,class U, class F>
-struct Bind: public Dist<U,Bind<T,E,U,F>>
-{
-	Dist<T,E> const&d;
-	F cont;
-	Bind(Dist<T,E> const & db,F tcont):d(db),cont(tcont){}
-	template<class G>
-	auto integrate(G&& fun) const {
-		return d.integrate([&](T const & x){
-			       	return cont(x).integrate(fun);
-				});
-	}
-
-};
-
-template<class T,class E, class F>
-auto bind(Dist<T,E> const & source,F cont) {
-	using U = decltype(source.integrate(cont).integrate([](auto x){return x;}));
-	return Bind<T,E,U,F>(source,cont);
-}
-
-template<class T,class E, class F>
-auto operator>>(Dist<T,E> const & source,F cont) {
-	return bind(source,cont);
-}
-
 template <class T>
 struct DistMap:public Dist<T,DistMap<T>> {
 	std::unordered_map<T,tprob> weights;
@@ -239,9 +151,26 @@ struct DistMap:public Dist<T,DistMap<T>> {
 		total_weight = std::move(r.total_weight);
 	}
 
+	template<class E>
+	DistMap& operator =(Dist<T,E> &&d) {
+		auto l = [](const T& x){ return ret(x);}; 
+		auto r = d.integrate(l);
+		weights = std::move(r.weights);
+		total_weight = std::move(r.total_weight);
+		return *this;
+	}
+
 	//DistMap(const T& val):weights{{val,1.0}},total_weight{1.0} {}
 
-	//DistMap(DistMap&& mv):weights(std::move(mv.weights)),total_weight(mv.total_weight) {}
+	DistMap(DistMap&& mv) = default;//:weights(std::move(mv.weights)),total_weight(mv.total_weight) {}
+	DistMap(DistMap const& cp) = default;//:weights(std::move(mv.weights)),total_weight(mv.total_weight) {}
+	DistMap& operator = (DistMap&& mv) = default;
+	DistMap& operator = (DistMap const & cp) = default;
+	/*{
+		weights = std::move(mv.weights);
+		total_weight(mv.total_weight);
+		return *this;
+	}*/
 
 	template<typename U>
 	DistMap(std::piecewise_construct_t,U&& map):weights(std::forward<U>(map)),total_weight{tmath::tzero<tprob>()} {
@@ -259,22 +188,116 @@ struct DistMap:public Dist<T,DistMap<T>> {
 	DistMap(int x): total_weight(0){ if (x != 0) throw "meh"; }
 
 
-	static auto ret(T x) { return DistMap<T>{std::piecewise_construct,{{x,1.0}} }; }
+	static auto ret(T const & x) { return DistMap<T>{std::piecewise_construct,{{x,1.0}} }; }
 private:
-	void add_util(T const & k,tprob scale) {
+	void add_util(T const & k,tprob weight) {
 		auto it = weights.find(k);
 		if (it!=weights.end())
-			tmath::tmul(it->second,scale);
+			tmath::tadd(it->second,weight);
 		else
-			weights.emplace(std::piecewise_construct,std::forward_as_tuple(k),std::forward_as_tuple(scale));
+			weights.emplace(std::piecewise_construct,std::forward_as_tuple(k),std::forward_as_tuple(weight));
 	}
 
 };
 
+template<class T,class E>
+struct Normalized: Dist<T,Normalized<T,E>> {
+	DistMap<T> const  unnorm;
+	
+	Normalized(Dist<T,E> &&v): unnorm(std::move(v)){}
+
+	template<typename F>
+	auto integrate(F&& fun) const {
+		auto v = unnorm.integrate(fun);
+		return tmath::tdiv(v,unnorm.norm());
+	}
+
+	tprob norm() const { return 1.0; }
+};
+
+template<class T,class E>
+auto operator ~(Dist<T,E> &&v) { return Normalized<T,E>(std::move(v)); }
+
+template<class T,class E1,class E2>
+struct Sum: Dist<T,Sum<T,E1,E2>> {
+	DistMap<T> const lhs;
+	DistMap<T> const rhs;
+	Sum(Dist<T,E1> && tb, Dist<T,E2> && fb):lhs(std::move(tb)),rhs(std::move(fb)) {} 
+
+	template<class F>
+	auto integrate(F&& fun) const {
+
+		auto v = lhs.integrate(fun);
+		return std::move(tmath::tadd(v,rhs.integrate(fun)));
+	}
+
+	tprob norm() const { return lhs.norm() + rhs.norm(); }
+};
+
+template<class T,class E1,class E2>
+auto operator +(Dist<T,E1> && lhs,Dist<T,E2> && rhs) { return Sum<T,E1,E2>(std::move(lhs),std::move(rhs)); }
+
+template<class T,class E>
+struct Mul: Dist<T,Mul<T,E>> {
+	DistMap<T> const lhs;
+	tprob scale;
+	Mul(Dist<T,E> && tb, tprob fb):lhs(std::move(tb)),scale(fb) {} 
+
+	template<class F>
+	auto integrate(F&& fun) const {
+		auto v = lhs.integrate(fun);
+		return std::move(tmath::tmul(v,scale));
+	}
+	tprob norm() const { return lhs.norm() * scale; }
+
+};
+template<class T,class E>
+auto operator *(Dist<T,E> &&lhs,tprob scale) { return Mul<T,E>(std::move(lhs),scale); }
+
+template<class T,class E>
+auto operator *(tprob scale,Dist<T,E> &&lhs) { return Mul<T,E>(std::move(lhs),scale); }
+
+template<class T,class E1,class E2>
+auto mix(tprob v, Dist<T,E1> lhs,Dist<T,E2> rhs) {
+       	return ~((lhs * v) + (rhs * (tprob(1.0) - v)));
+}
+
+template<class T,class E,class U, class F>
+struct Bind: public Dist<U,Bind<T,E,U,F>>
+{
+	DistMap<T> const d;
+	F cont;
+	Bind(Dist<T,E> && db,F tcont):d(std::move(db)),cont(tcont){}
+	template<class G>
+	auto integrate(G&& fun) const {
+		return d.integrate([&](T const & x){
+			       	return cont(x).integrate(fun);
+				});
+	}
+
+};
+
+
+
+
+template<class T,class E, class F>
+auto bind(Dist<T,E> && source,F cont) {
+	using U = decltype(cont(*(T*)nullptr).integrate([](auto const &y) {return y;}));
+	//using U = decltype(source.integrate([&](T const & x){ return cont(x).integrate([](auto const & y){return y;});  }));
+	return Bind<T,E,U,F>(std::move(source),cont);
+}
+
+template<class T,class E, class F>
+auto operator>>(Dist<T,E> && source,F cont) {
+	return bind(std::move(source),cont);
+}
+
 template<class T>
 auto ret(T x) { return DistMap<T>::ret(x); }
 
-DistMap<bool> bernoulli(tprob p) {
+using Bernoulli = DistMap<bool>;
+
+Bernoulli bernoulli(tprob p) {
 	tprob q = tprob(1);
 	tmath::tfma(q,p,tprob(-1));
 	return {std::piecewise_construct,{{true,p},{false,q}}};
@@ -293,7 +316,12 @@ DistMap<T> uniform(It begin, It end) {
 	}
 	return {std::piecewise_construct,weights};
 }
+
 template<class T>
-DistMap<T> empty() {
+DistMap<T> uniform(std::initializer_list<T> init) {
+	return uniform<T,decltype(init.begin())>(init.begin(),init.end());
+}
+template<class T>
+DistMap<T> empty(T= tmath::tzero<T>()) {
 	return DistMap<T>();
 }
