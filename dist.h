@@ -2,10 +2,27 @@
 #include <cmath>
 typedef double tprob;
 
+template<typename F>
+struct f_trait : public f_trait<decltype(std::function(*(F*)(nullptr)))>{};
+
+template<typename R,typename A>
+struct f_trait<std::function<R(A)>> {
+	
+    typedef R result_type;
+    enum { arity = 1 };
+
+    template <size_t i>
+    struct arg
+    {
+        typedef A type;// std::tuple_element<i, std::tuple<A...>>::type type;
+    };
+};
+
+
 template<int I> struct rank : public rank <I-1>{};
 template<> struct rank<0> {};
 
-struct tmath {
+namespace tmath {
 	template<class T>
 	static T tzero() {
 		return T(0);
@@ -87,6 +104,16 @@ template<class T,class E>
 struct Dist {
 	using domain_type=T;
 
+	template<class F>
+	auto operator()(F cont) {
+		return std::move(*this) >> [cont](auto x){return ret(cont(x));};
+	}
+
+	template<class F>
+	auto operator[](F guard) {
+		return std::move(*this) >> [guard](auto x){return guard(x)?ret(x):empty(x);};
+	}
+
 	tprob norm() const {
 		return norm(rank<1>());
 	}
@@ -114,11 +141,11 @@ struct DistMap:public Dist<T,DistMap<T>> {
        	}
 	template<class F>
 	auto integrate(F&& fun) const {
-		using U = decltype((fun(weights.begin()->first)));
+		using U = typename f_trait<F>::result_type;
 		auto x =tmath::tzero<U>();
 		for (auto const &e : weights) {
 			auto v = fun(e.first);
-			tmath::tmul(v,e.second,rank<2>());
+			tmath::tmul(v,e.second);
 			tmath::tadd(x,v);
 			//tmath::tfma(x,v,e.second,rank<1>());
 		}
@@ -185,7 +212,7 @@ struct DistMap:public Dist<T,DistMap<T>> {
 
 	//zero
 	DistMap():total_weight(0) {}
-	DistMap(int x): total_weight(0){ if (x != 0) throw "meh"; }
+//	DistMap(int x): total_weight(0){ if (x != 0) throw "meh"; }
 
 
 	static auto ret(T const & x) { return DistMap<T>{std::piecewise_construct,{{x,1.0}} }; }
@@ -277,11 +304,9 @@ struct Bind: public Dist<U,Bind<T,E,U,F>>
 
 };
 
-
-
-
 template<class T,class E, class F>
 auto bind(Dist<T,E> && source,F cont) {
+	//typename f_trait<F>::result_type
 	using U = decltype(cont(*(T*)nullptr).integrate([](auto const &y) {return y;}));
 	//using U = decltype(source.integrate([&](T const & x){ return cont(x).integrate([](auto const & y){return y;});  }));
 	return Bind<T,E,U,F>(std::move(source),cont);
@@ -291,6 +316,7 @@ template<class T,class E, class F>
 auto operator>>(Dist<T,E> && source,F cont) {
 	return bind(std::move(source),cont);
 }
+
 
 template<class T>
 auto ret(T x) { return DistMap<T>::ret(x); }
